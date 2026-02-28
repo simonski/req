@@ -11,6 +11,8 @@ go install github.com/steveyegge/beads/cmd/bd@v0.47.1
 # else
 go install github.com/steveyegge/beads/cmd/bd@latest
 
+dolt sql-server--port 3307
+
 make setup
 make tools
 make reset
