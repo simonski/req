@@ -20,11 +20,13 @@ tools:
 	done
 
 reset:
-	@bd reset --force
+	@rm -rf .beads
+	@rm -rf .git/beads-worktrees
 	@bd init --prefix req
 	@bd sync
 	@bd migrate sync beads-sync
 	@bd ready
+	@echo Restart VSCode
 
 clean:
 	@rm -rf bin

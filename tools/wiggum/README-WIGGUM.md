@@ -22,12 +22,6 @@ The instance of this wiggum will have a unique name "fred, pete, ralph, jane" wh
 
 Usage
 
-./wiggum agent "codex --approval-mode never"
-    runs a coding agent command with stdin/stdout/stderr passed straight through, so the session behaves like a direct invocation.
-
-./wiggum agent codex --approval-mode never
-    same as above, but without shell parsing.
-
 ./wiggum loop -name fred -max 1
     performs the work in a loop -max times (0 = forever)
 
@@ -41,4 +35,30 @@ what sort of ralph wiggum loop woudl make beads keep working until it finished -
 
 no, I want wiggum to look at beads directly using bd commands, find hte next best ticket and work on it
 
-extend wiggum.go and parser.go so that they print a useful help usage if they are invoked with no command
+extend wiggum to have an agent commmand
+
+wiggum agent 
+    where it will spawn a new process and retain proxy STDIN/OUT to this agent process, optiosn are
+
+wiggum agent "entire command"
+
+Where the entire command is then executed in a process.
+It is expected that the process spawned is a coding agent, so the STDIN/STDOUT should be rewired so that "wiggum agent" acts as a sort of wrapper aroudn the invocation.  
+
+The user of "wiggum agent" shoudl then be able to interact with the process IN and OUT as if they had called it directly.  
+
+This is so that we can demonsrate wiggum can talk to a coding agent.
+
+
+codex --dangerously-bypass-approvals-and-sandbox "
+
+-./wiggum agent "codex --approval-mode never"
+-    runs a coding agent command with stdin/stdout/stderr passed straight through, so the session behaves like a direct invocation.
+-
+-./wiggum agent codex --approval-mode never
+-    same as above, but without shell parsing.
+-
+
+
+-extend wiggum.go and parser.go so that they print a useful help usage if they are invoked with no command
+
