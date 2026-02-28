@@ -6,11 +6,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -376,18 +379,30 @@ func performWork(item issue, name, branch string) error {
 		return errors.New("WIGGUM_WORK_CMD is not set for non-dry-run execution")
 	}
 
-	packet := renderPrompt(renderWorkPacket(item, name, branch, true, branch != "", false))
+	startedAt := time.Now()
+	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, branch != "", false))
+	transcript := &lockedBuffer{}
 	cmd := exec.Command("sh", "-c", workCmd)
-	cmd.Stdin = strings.NewReader(packet)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdin = strings.NewReader(prompt)
+	cmd.Stdout = io.MultiWriter(os.Stdout, transcript)
+	cmd.Stderr = io.MultiWriter(os.Stderr, transcript)
 	cmd.Env = append(os.Environ(),
 		"WIGGUM_NAME="+name,
 		"WIGGUM_ISSUE_ID="+item.ID,
 		"WIGGUM_LOGICAL_ID="+item.ExternalRef,
 		"WIGGUM_BRANCH="+branch,
 	)
-	if err := cmd.Run(); err != nil {
+
+	err := cmd.Run()
+	completedAt := time.Now()
+	exitCode := exitCodeFor(err)
+	if logErr := writeAgentLog(item.ID, name, branch, prompt, transcript.String(), startedAt, completedAt, exitCode); logErr != nil {
+		if err != nil {
+			return fmt.Errorf("worker command failed for %s: %w (also failed to write log: %v)", item.ID, err, logErr)
+		}
+		return fmt.Errorf("failed to write agent log for %s: %w", item.ID, logErr)
+	}
+	if err != nil {
 		return fmt.Errorf("worker command failed for %s: %w", item.ID, err)
 	}
 	return nil
@@ -538,6 +553,135 @@ func renderPrompt(packet string) string {
 		return template + packet
 	}
 	return template + "\n" + packet
+}
+
+type lockedBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuffer) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuffer) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+func writeAgentLog(beadID, name, branch, prompt, transcript string, startedAt, completedAt time.Time, exitCode int) error {
+	logPath := filepath.Join("logs", sanitizeLogComponent(name), logFileName(beadID, branch))
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		return err
+	}
+
+	var b strings.Builder
+	fmt.Fprintln(&b, "FULL PROMPT")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, prompt)
+	if !strings.HasSuffix(prompt, "\n") {
+		fmt.Fprintln(&b)
+	}
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "FULL STDIN/STDOUT")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "STDIN:")
+	fmt.Fprintln(&b, prompt)
+	if !strings.HasSuffix(prompt, "\n") {
+		fmt.Fprintln(&b)
+	}
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, "STDOUT:")
+	fmt.Fprintln(&b, transcript)
+	if !strings.HasSuffix(transcript, "\n") {
+		fmt.Fprintln(&b)
+	}
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "TIME STARTED:")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, startedAt.Format(time.RFC3339Nano))
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "TIME COMPLETED:")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, completedAt.Format(time.RFC3339Nano))
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "EXIT CODE:")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, exitCode)
+	fmt.Fprintln(&b)
+
+	fmt.Fprintln(&b, "BEAD ID:")
+	fmt.Fprintln(&b, "-----------")
+	fmt.Fprintln(&b)
+	fmt.Fprintln(&b, beadID)
+
+	return os.WriteFile(logPath, []byte(b.String()), 0o644)
+}
+
+func logFileName(beadID, branch string) string {
+	return sanitizeLogComponent(beadID) + "-" + sanitizeLogComponent(branch) + ".log"
+}
+
+func sanitizeLogComponent(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			lastDash = false
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+			lastDash = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastDash = false
+		case r == '.' || r == '_' || r == '-':
+			if !(r == '-' && lastDash) {
+				b.WriteRune(r)
+				lastDash = r == '-'
+			}
+		default:
+			if !lastDash && b.Len() > 0 {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+
+	out := strings.Trim(b.String(), "-")
+	if out == "" {
+		return "unknown"
+	}
+	return out
+}
+
+func exitCodeFor(err error) int {
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 func splitAcceptance(input string) []string {

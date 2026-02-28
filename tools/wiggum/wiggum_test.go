@@ -1,8 +1,11 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildAgentCommandRequiresArgs(t *testing.T) {
@@ -92,5 +95,92 @@ func TestRenderWorkPacketIsPromptWrapped(t *testing.T) {
 	}
 	if !strings.Contains(got, "ID: bd-123\n") {
 		t.Fatalf("wrapped packet missing bead contents: %q", got)
+	}
+}
+
+func TestLogFileNameSanitizesPathLikeCharacters(t *testing.T) {
+	t.Parallel()
+
+	got := logFileName("bd/123", "feature/ralph/fix:thing")
+	want := "bd-123-feature-ralph-fix-thing.log"
+	if got != want {
+		t.Fatalf("logFileName() = %q, want %q", got, want)
+	}
+}
+
+func TestWriteAgentLogIncludesRequiredSections(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	startedAt := time.Date(2026, 2, 28, 11, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(2 * time.Minute)
+
+	if err := writeAgentLog("bd/123", "ralph", "feature/ralph/fix:thing", "Perform the following:\nBEAD", "agent output\n", startedAt, completedAt, 7); err != nil {
+		t.Fatalf("writeAgentLog() error = %v", err)
+	}
+
+	logPath := filepath.Join(tempDir, "logs", "ralph", "bd-123-feature-ralph-fix-thing.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", logPath, err)
+	}
+
+	got := string(data)
+	for _, want := range []string{
+		"FULL PROMPT\n-----------",
+		"FULL STDIN/STDOUT\n-----------",
+		"TIME STARTED:\n-----------",
+		"TIME COMPLETED:\n-----------",
+		"EXIT CODE:\n-----------",
+		"BEAD ID:\n-----------",
+		"STDIN:\nPerform the following:\nBEAD",
+		"STDOUT:\nagent output\n",
+		"2026-02-28T11:00:00Z",
+		"2026-02-28T11:02:00Z",
+		"\n7\n",
+		"\nbd/123\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("log content missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+	t.Setenv("WIGGUM_WORK_CMD", "printf 'agent says hi\\n'; cat >/dev/null; exit 7")
+	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
+
+	item := issue{
+		ID:          "bd-123",
+		Title:       "Tidy parser help",
+		Description: "Update the help output",
+		Acceptance:  "help prints usage|tests pass",
+		Status:      "open",
+		Priority:    2,
+		IssueType:   "task",
+	}
+
+	err := performWork(item, "ralph", "feature/ralph/tidy-parser-help")
+	if err == nil {
+		t.Fatal("performWork() error = nil, want non-nil")
+	}
+
+	logPath := filepath.Join(tempDir, "logs", "ralph", "bd-123-feature-ralph-tidy-parser-help.log")
+	data, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatalf("ReadFile(%q) error = %v", logPath, readErr)
+	}
+
+	got := string(data)
+	if !strings.Contains(got, "agent says hi\n") {
+		t.Fatalf("log missing worker output: %q", got)
+	}
+	if !strings.Contains(got, "\n7\n") {
+		t.Fatalf("log missing exit code 7: %q", got)
+	}
+	if !strings.Contains(got, "Perform the following:\nWiggum: ralph\n") {
+		t.Fatalf("log missing prompt: %q", got)
 	}
 }
