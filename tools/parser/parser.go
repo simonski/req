@@ -24,6 +24,8 @@ var (
 	storyIDPattern  = regexp.MustCompile(`^E\d+-S\d+$`)
 )
 
+const additionalContextAC = "Review docs/DESIGN.md and USER_GUIDE.md for additional context."
+
 type issue struct {
 	kind           issueType
 	title          string
@@ -49,10 +51,24 @@ type fieldLine struct {
 
 func main() {
 	var filePath string
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: parser -f REQUIREMENTS.md\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Reads a requirements markdown file, validates structure and references,\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "and prints shell-friendly bd create commands to stdout.\n\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "Flags:\n")
+		flag.PrintDefaults()
+	}
 	flag.StringVar(&filePath, "f", "", "requirements markdown file")
+
+	if len(os.Args) == 1 {
+		flag.Usage()
+		os.Exit(0)
+	}
+
 	flag.Parse()
 
 	if filePath == "" {
+		flag.Usage()
 		exitErr(errors.New("missing required -f flag"))
 	}
 
@@ -349,7 +365,19 @@ func normalizeAcceptance(values []fieldLine) []string {
 	for _, value := range values {
 		out = append(out, normalizeWhitespace(value.text))
 	}
+	if !containsStringFold(out, additionalContextAC) {
+		out = append(out, additionalContextAC)
+	}
 	return out
+}
+
+func containsStringFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanValue(line, prefix string) string {

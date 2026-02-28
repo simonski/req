@@ -10,8 +10,16 @@ bd init --prefix req
 bd doctor
 bd sync
 bd migrate sync beads-sync
+bd ready
+go run parser.go -f REQUIREMENTS.md > commands.sh
+bash commands.sh
 ```
 
+## building
+
+```bash
+go run wiggum.go -no-claim -no-branch
+```
 
 ## Building
 
