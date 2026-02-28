@@ -27,8 +27,8 @@ setup:
 	@echo Restart VSCode
 
 reset:
-	@bd list -n 0 --json | jq '.[].id' | xargs bd delete $1 -f
-	@bd list -s closed -n 0 --json | jq '.[].id' | xargs bd delete $1 -f
+	bd list -n 0 --json | jq '.[].id' | xargs bd delete $1 -f --hard
+	bd list -s closed -n 0 --json | jq '.[].id' | xargs bd delete $1 -f --hard
 
 clean:
 	@rm -rf bin

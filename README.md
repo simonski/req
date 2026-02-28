@@ -6,10 +6,10 @@
 
 ```bash
 # if on an intel mac
-go install github.com/steveyegge/beads@v0.47.1
+go install github.com/steveyegge/beads/cmd/bd@v0.47.1
 
 # else
-go install github.com/steveyegge/beads@latest
+go install github.com/steveyegge/beads/cmd/bd@latest
 
 make setup
 make tools
