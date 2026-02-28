@@ -11,9 +11,12 @@ go install github.com/steveyegge/beads@v0.47.1
 # else
 go install github.com/steveyegge/beads@latest
 
-make reset
+make setup
 make tools
+make reset
+
 ```
+
 
 See the beads - should be zero beads.   
 

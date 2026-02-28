@@ -19,14 +19,16 @@ tools:
 		go build -o "bin/$$name" "$$tool"; \
 	done
 
-reset:
-	@rm -rf .beads
-	@rm -rf .git/beads-worktrees
+setup:
 	@bd init --prefix req
 	@bd sync
 	@bd migrate sync beads-sync
 	@bd ready
 	@echo Restart VSCode
+
+reset:
+	@bd list -n 0 --json | jq '.[].id' | xargs bd delete $1 -f
+	@bd list -s closed -n 0 --json | jq '.[].id' | xargs bd delete $1 -f
 
 clean:
 	@rm -rf bin
