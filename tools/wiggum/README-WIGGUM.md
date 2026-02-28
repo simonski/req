@@ -22,6 +22,12 @@ The instance of this wiggum will have a unique name "fred, pete, ralph, jane" wh
 
 Usage
 
+./wiggum agent "codex --approval-mode never"
+    runs a coding agent command with stdin/stdout/stderr passed straight through, so the session behaves like a direct invocation.
+
+./wiggum agent codex --approval-mode never
+    same as above, but without shell parsing.
+
 ./wiggum loop -name fred -max 1
     performs the work in a loop -max times (0 = forever)
 

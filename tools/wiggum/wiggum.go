@@ -61,6 +61,10 @@ func main() {
 		if err := runCheck(os.Args[2:]); err != nil {
 			exitErr(err)
 		}
+	case "agent":
+		if err := runAgent(os.Args[2:]); err != nil {
+			exitErr(err)
+		}
 	case "-h", "--help", "help":
 		printUsage()
 	default:
@@ -221,15 +225,63 @@ func runCheck(args []string) error {
 
 func printUsage() {
 	fmt.Println("Usage:")
+	fmt.Println("  wiggum agent \"entire command\"")
+	fmt.Println("  wiggum agent command [arg...]")
 	fmt.Println("  wiggum check -name fred")
 	fmt.Println("  wiggum loop -name fred -max 1")
 	fmt.Println("  wiggum loop -name fred -max 1 -dryrun")
 	fmt.Println()
 	fmt.Println("Commands:")
+	fmt.Println("  agent   Run an interactive coding agent command with stdio passed through.")
 	fmt.Println("  check   Show what wiggum would do next without changing beads or git.")
 	fmt.Println("  loop    Claim the next best ready bead, work it, close it, and repeat.")
 	fmt.Println()
-	fmt.Println("Run `wiggum check -h` or `wiggum loop -h` for command flags.")
+	fmt.Println("Run `wiggum agent -h`, `wiggum check -h`, or `wiggum loop -h` for command flags.")
+}
+
+func runAgent(args []string) error {
+	fs := flag.NewFlagSet("agent", flag.ContinueOnError)
+	fs.SetOutput(os.Stdout)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "Usage: wiggum agent \"entire command\"\n")
+		fmt.Fprintf(fs.Output(), "       wiggum agent command [arg...]\n\n")
+		fmt.Fprintf(fs.Output(), "Starts a child process and passes stdin, stdout, and stderr through directly,\n")
+		fmt.Fprintf(fs.Output(), "so interactive coding agents behave as if they were launched without wiggum.\n")
+	}
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	cmd, err := buildAgentCommand(fs.Args())
+	if err != nil {
+		fs.Usage()
+		return err
+	}
+
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("agent command failed: %w", err)
+	}
+	return nil
+}
+
+func buildAgentCommand(args []string) (*exec.Cmd, error) {
+	switch len(args) {
+	case 0:
+		return nil, errors.New("missing agent command")
+	case 1:
+		return exec.Command("sh", "-c", args[0]), nil
+	default:
+		return exec.Command(args[0], args[1:]...), nil
+	}
 }
 
 func loadReady(limit int) ([]issue, error) {

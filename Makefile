@@ -13,7 +13,7 @@ help:
 tools:
 	@mkdir -p bin
 	@set -e; \
-	for tool in $$(find tools -mindepth 2 -maxdepth 2 -type f -name '*.go' | sort); do \
+	for tool in $$(find tools -mindepth 2 -maxdepth 2 -type f -name '*.go' ! -name '*_test.go' | sort); do \
 		name=$$(basename $$(dirname $$tool)); \
 		printf "Building %s -> bin/%s\n" "$$tool" "$$name"; \
 		go build -o "bin/$$name" "$$tool"; \
