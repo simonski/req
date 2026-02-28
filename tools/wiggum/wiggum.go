@@ -48,6 +48,16 @@ type dep struct {
 	ExternalRef    string `json:"external_ref"`
 }
 
+type workStatus struct {
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
+	ExitCode    int    `json:"exit_code"`
+	Branch      string `json:"branch"`
+	BeadID      string `json:"bead_id"`
+	Title       string `json:"title"`
+	Instruction string `json:"instruction"`
+}
+
 var logicalIDPattern = regexp.MustCompile(`(?i)\[Logical ID:\s*([^\]]+)\]`)
 
 func main() {
@@ -85,14 +95,13 @@ func runLoop(args []string) error {
 		name       string
 		max        int
 		dryRunSecs int
-		agentCmd   string
 		readyLimit int
 		sleepSecs  int
 		noBranch   bool
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -agent \"command\" -max 1 [-dryrun N]\n\n")
+		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -max 1 [-dryrun N]\n\n")
 		fmt.Fprintf(fs.Output(), "Chooses the next best ready bead for the named wiggum, assigns it,\n")
 		fmt.Fprintf(fs.Output(), "creates or switches to a branch for the work, performs the work,\n")
 		fmt.Fprintf(fs.Output(), "closes the bead, and repeats.\n\n")
@@ -101,7 +110,6 @@ func runLoop(args []string) error {
 	}
 
 	fs.StringVar(&name, "name", "", "unique wiggum name used for assignment")
-	fs.StringVar(&agentCmd, "agent", "", "full agent command used to process the work packet")
 	fs.IntVar(&max, "max", 1, "maximum number of issues to process (0 = forever)")
 	fs.IntVar(&dryRunSecs, "dryrun", -1, "simulate work and pass this integer to the dry-run invocation")
 	fs.IntVar(&readyLimit, "limit", defaultReadyLimit, "maximum ready issues to consider per iteration")
@@ -123,10 +131,6 @@ func runLoop(args []string) error {
 		return errors.New("sleep must be >= 0")
 	}
 	dryRun := dryRunSecs >= 0
-	if !dryRun && strings.TrimSpace(agentCmd) == "" {
-		fs.Usage()
-		return errors.New("missing required -agent flag")
-	}
 
 	processed := 0
 	for max == 0 || processed < max {
@@ -168,7 +172,7 @@ func runLoop(args []string) error {
 				return err
 			}
 		} else {
-			if err := performWork(full, name, branchName, branched, agentCmd); err != nil {
+			if err := performWork(full, name, branchName, branched); err != nil {
 				return err
 			}
 		}
@@ -245,8 +249,8 @@ func printUsage() {
 	fmt.Println("  wiggum agent \"entire command\"")
 	fmt.Println("  wiggum agent command [arg...]")
 	fmt.Println("  wiggum check -name fred")
-	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1")
-	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1 -dryrun 5")
+	fmt.Println("  wiggum loop -name fred -max 1")
+	fmt.Println("  wiggum loop -name fred -max 1 -dryrun 5")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  agent   Run an interactive coding agent command with stdio passed through.")
@@ -386,11 +390,8 @@ func showIssue(id string) (issue, error) {
 	return issues[0], nil
 }
 
-func performWork(item issue, name, branch string, branched bool, agentCmd string) error {
-	if strings.TrimSpace(agentCmd) == "" {
-		return errors.New("agent command is required")
-	}
-	err := runWorkCommand(item, name, branch, branched, false, agentCmd)
+func performWork(item issue, name, branch string, branched bool) error {
+	err := runWorkCommand(item, name, branch, branched, false, 0)
 	if err != nil {
 		return fmt.Errorf("worker command failed for %s: %w", item.ID, err)
 	}
@@ -398,23 +399,57 @@ func performWork(item issue, name, branch string, branched bool, agentCmd string
 }
 
 func performDryRunWork(item issue, name, branch string, branched bool, dryRunSecs int) error {
-	return runWorkCommand(item, name, branch, branched, true, dryRunCommand(dryRunSecs))
+	return runWorkCommand(item, name, branch, branched, true, dryRunSecs)
 }
 
 func dryRunCommand(dryRunSecs int) string {
 	return fmt.Sprintf("echo 'dry-run; sleep %d'", dryRunSecs)
 }
 
-func runWorkCommand(item issue, name, branch string, branched, dryRun bool, command string) error {
+func runWorkCommand(item issue, name, branch string, branched, dryRun bool, dryRunSecs int) error {
 	startedAt := time.Now()
-	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, branched, dryRun))
+	input := renderWorkPacket(item, name, branch, true, branched, dryRun)
+	prompt := renderPrompt(input)
 	transcript := &lockedBuffer{}
 
-	cmd, err := buildAgentCommand([]string{command})
-	if err != nil {
+	workDir := workDirFor(item)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
 		return err
 	}
-	cmd.Stdin = strings.NewReader(prompt)
+
+	inputPath := filepath.Join(workDir, "input.md")
+	if err := os.WriteFile(inputPath, []byte(input), 0o644); err != nil {
+		return err
+	}
+
+	promptPath := filepath.Join(workDir, "prompt.md")
+	if err := os.WriteFile(promptPath, []byte(prompt), 0o644); err != nil {
+		return err
+	}
+
+	var (
+		cmd         *exec.Cmd
+		err         error
+		instruction string
+	)
+	if dryRun {
+		instruction = dryRunCommand(dryRunSecs)
+		cmd, err = buildAgentCommand([]string{instruction})
+		if err != nil {
+			return err
+		}
+		cmd.Stdin = strings.NewReader(prompt)
+	} else {
+		promptFile, openErr := os.Open(promptPath)
+		if openErr != nil {
+			return openErr
+		}
+		defer promptFile.Close()
+
+		cmd = exec.Command("codex", "exec", "-")
+		cmd.Stdin = promptFile
+		instruction = "codex exec - < " + promptPath
+	}
 	cmd.Stdout = io.MultiWriter(os.Stdout, transcript)
 	cmd.Stderr = io.MultiWriter(os.Stderr, transcript)
 	cmd.Env = append(os.Environ(),
@@ -427,11 +462,11 @@ func runWorkCommand(item issue, name, branch string, branched, dryRun bool, comm
 	err = cmd.Run()
 	completedAt := time.Now()
 	exitCode := exitCodeFor(err)
-	if logErr := writeAgentLog(item.ID, name, branch, prompt, transcript.String(), startedAt, completedAt, exitCode); logErr != nil {
+	if logErr := writeWorkArtifacts(workDir, item, branch, instruction, transcript.String(), startedAt, completedAt, exitCode); logErr != nil {
 		if err != nil {
-			return fmt.Errorf("%w (also failed to write log: %v)", err, logErr)
+			return fmt.Errorf("%w (also failed to write work artifacts: %v)", err, logErr)
 		}
-		return fmt.Errorf("failed to write agent log for %s: %w", item.ID, logErr)
+		return fmt.Errorf("failed to write work artifacts for %s: %w", item.ID, logErr)
 	}
 	return err
 }
@@ -600,66 +635,32 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-func writeAgentLog(beadID, name, branch, prompt, transcript string, startedAt, completedAt time.Time, exitCode int) error {
-	logPath := filepath.Join("logs", sanitizeLogComponent(name), logFileName(beadID, branch))
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+func writeWorkArtifacts(workDir string, item issue, branch, instruction, transcript string, startedAt, completedAt time.Time, exitCode int) error {
+	outputPath := filepath.Join(workDir, "output.md")
+	if err := os.WriteFile(outputPath, []byte(transcript), 0o644); err != nil {
 		return err
 	}
 
-	var b strings.Builder
-	fmt.Fprintln(&b, "FULL PROMPT")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, prompt)
-	if !strings.HasSuffix(prompt, "\n") {
-		fmt.Fprintln(&b)
+	status := workStatus{
+		StartedAt:   startedAt.Format(time.RFC3339Nano),
+		CompletedAt: completedAt.Format(time.RFC3339Nano),
+		ExitCode:    exitCode,
+		Branch:      branch,
+		BeadID:      item.ID,
+		Title:       item.Title,
+		Instruction: instruction,
 	}
-	fmt.Fprintln(&b)
 
-	fmt.Fprintln(&b, "FULL STDIN/STDOUT")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "STDIN:")
-	fmt.Fprintln(&b, prompt)
-	if !strings.HasSuffix(prompt, "\n") {
-		fmt.Fprintln(&b)
+	statusBytes, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
 	}
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, "STDOUT:")
-	fmt.Fprintln(&b, transcript)
-	if !strings.HasSuffix(transcript, "\n") {
-		fmt.Fprintln(&b)
-	}
-	fmt.Fprintln(&b)
-
-	fmt.Fprintln(&b, "TIME STARTED:")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, startedAt.Format(time.RFC3339Nano))
-	fmt.Fprintln(&b)
-
-	fmt.Fprintln(&b, "TIME COMPLETED:")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, completedAt.Format(time.RFC3339Nano))
-	fmt.Fprintln(&b)
-
-	fmt.Fprintln(&b, "EXIT CODE:")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, exitCode)
-	fmt.Fprintln(&b)
-
-	fmt.Fprintln(&b, "BEAD ID:")
-	fmt.Fprintln(&b, "-----------")
-	fmt.Fprintln(&b)
-	fmt.Fprintln(&b, beadID)
-
-	return os.WriteFile(logPath, []byte(b.String()), 0o644)
+	statusBytes = append(statusBytes, '\n')
+	return os.WriteFile(filepath.Join(workDir, "status.json"), statusBytes, 0o644)
 }
 
-func logFileName(beadID, branch string) string {
-	return sanitizeLogComponent(beadID) + "-" + sanitizeLogComponent(branch) + ".log"
+func workDirFor(item issue) string {
+	return filepath.Join("logs", sanitizeLogComponent(item.ID)+"-"+sanitizeLogComponent(item.Title))
 }
 
 func sanitizeLogComponent(value string) string {

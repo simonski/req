@@ -62,3 +62,33 @@ codex --dangerously-bypass-approvals-and-sandbox "
 
 -extend wiggum.go and parser.go so that they print a useful help usage if they are invoked with no command
 
+- extend "wiggum" so that for each piece of work carried out during the loop, for each bead, maintain a logfile of all the STDIN/STDOUT to/from the AGENT.   At the end, ensure the exit code is recorded in the file.    The file should be plain text and should contain
+
+modify wiggum so that it
+    finds the next appropriate bead as before
+    creates a new folder to hold the work
+        logs/<bead-id>-bead-name/ 
+    it writes the bead as "folder/input.md"
+    it writes to the folder the response from the agent as $folder/output.md
+    it writes start/stop/exit code/branch/bead id/title/instruction to $folder/status.json
+    it invokes and instructs the agent using "codex exec - < path/to/prompt.md" where the prompt.md is the prompt
+
+FULL PROMPT
+-----------
+
+FULL STDIN/STDOUT
+-----------
+
+TIME STARTED:
+-----------
+
+TIME COMPLETED:
+-----------
+
+EXIT CODE:
+-----------
+
+BEAD ID:
+-----------
+
+The filename should be logs/<wiggum-name>/<bead-id>-<branch-name>.log - replace any path like characters with a hyphen.

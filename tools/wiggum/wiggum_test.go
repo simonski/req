@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -53,15 +55,6 @@ func TestBuildAgentCommandUsesDirectExecForMultipleArguments(t *testing.T) {
 		if gotArgs[i] != wantArgs[i] {
 			t.Fatalf("Args[%d] = %q, want %q (all args: %v)", i, gotArgs[i], wantArgs[i], gotArgs)
 		}
-	}
-}
-
-func TestRunLoopRequiresAgentWhenNotDryRun(t *testing.T) {
-	t.Parallel()
-
-	err := runLoop([]string{"-name", "ralph", "-max", "1"})
-	if err == nil || !strings.Contains(err.Error(), "missing required -agent flag") {
-		t.Fatalf("runLoop() error = %v, want missing required -agent flag", err)
 	}
 }
 
@@ -126,58 +119,71 @@ func TestRenderWorkPacketIsPromptWrapped(t *testing.T) {
 	}
 }
 
-func TestLogFileNameSanitizesPathLikeCharacters(t *testing.T) {
+func TestWorkDirForSanitizesPathLikeCharacters(t *testing.T) {
 	t.Parallel()
 
-	got := logFileName("bd/123", "feature/ralph/fix:thing")
-	want := "bd-123-feature-ralph-fix-thing.log"
+	got := workDirFor(issue{ID: "bd/123", Title: "Fix: thing"})
+	want := filepath.Join("logs", "bd-123-Fix-thing")
 	if got != want {
-		t.Fatalf("logFileName() = %q, want %q", got, want)
+		t.Fatalf("workDirFor() = %q, want %q", got, want)
 	}
 }
 
-func TestWriteAgentLogIncludesRequiredSections(t *testing.T) {
+func TestWriteWorkArtifactsIncludesExpectedFiles(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
 
-	startedAt := time.Date(2026, 2, 28, 11, 0, 0, 0, time.UTC)
-	completedAt := startedAt.Add(2 * time.Minute)
-
-	if err := writeAgentLog("bd/123", "ralph", "feature/ralph/fix:thing", "Perform the following:\nBEAD", "agent output\n", startedAt, completedAt, 7); err != nil {
-		t.Fatalf("writeAgentLog() error = %v", err)
+	item := issue{ID: "bd/123", Title: "Fix: thing"}
+	workDir := workDirFor(item)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", workDir, err)
 	}
 
-	logPath := filepath.Join(tempDir, "logs", "ralph", "bd-123-feature-ralph-fix-thing.log")
-	data, err := os.ReadFile(logPath)
+	startedAt := "2026-02-28T11:00:00Z"
+	completedAt := "2026-02-28T11:02:00Z"
+	if err := writeWorkArtifacts(
+		workDir,
+		item,
+		"feature/ralph/fix-thing",
+		"codex exec - < logs/bd-123-Fix-thing/prompt.md",
+		"agent output\n",
+		mustParseRFC3339(t, startedAt),
+		mustParseRFC3339(t, completedAt),
+		7,
+	); err != nil {
+		t.Fatalf("writeWorkArtifacts() error = %v", err)
+	}
+
+	outputPath := filepath.Join(tempDir, workDir, "output.md")
+	data, err := os.ReadFile(outputPath)
 	if err != nil {
-		t.Fatalf("ReadFile(%q) error = %v", logPath, err)
+		t.Fatalf("ReadFile(%q) error = %v", outputPath, err)
+	}
+	if got := string(data); got != "agent output\n" {
+		t.Fatalf("output.md = %q, want %q", got, "agent output\n")
 	}
 
-	got := string(data)
-	for _, want := range []string{
-		"FULL PROMPT\n-----------",
-		"FULL STDIN/STDOUT\n-----------",
-		"TIME STARTED:\n-----------",
-		"TIME COMPLETED:\n-----------",
-		"EXIT CODE:\n-----------",
-		"BEAD ID:\n-----------",
-		"STDIN:\nPerform the following:\nBEAD",
-		"STDOUT:\nagent output\n",
-		"2026-02-28T11:00:00Z",
-		"2026-02-28T11:02:00Z",
-		"\n7\n",
-		"\nbd/123\n",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("log content missing %q in %q", want, got)
-		}
+	statusPath := filepath.Join(tempDir, workDir, "status.json")
+	statusBytes, err := os.ReadFile(statusPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", statusPath, err)
+	}
+
+	var got workStatus
+	if err := json.Unmarshal(statusBytes, &got); err != nil {
+		t.Fatalf("json.Unmarshal(status.json) error = %v", err)
+	}
+
+	if got.StartedAt != startedAt || got.CompletedAt != completedAt || got.ExitCode != 7 || got.Branch != "feature/ralph/fix-thing" || got.BeadID != "bd/123" || got.Title != "Fix: thing" || got.Instruction != "codex exec - < logs/bd-123-Fix-thing/prompt.md" {
+		t.Fatalf("status.json = %+v", got)
 	}
 }
 
-func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
+func TestPerformWorkWritesArtifactsOnWorkerFailure(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
+	installFakeCodex(t, tempDir, 7, "agent says hi\n")
 
 	item := issue{
 		ID:          "bd-123",
@@ -189,30 +195,48 @@ func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
 		IssueType:   "task",
 	}
 
-	err := performWork(item, "ralph", "feature/ralph/tidy-parser-help", true, "printf 'agent says hi\\n'; cat >/dev/null; exit 7")
+	err := performWork(item, "ralph", "feature/ralph/tidy-parser-help", true)
 	if err == nil {
 		t.Fatal("performWork() error = nil, want non-nil")
 	}
 
-	logPath := filepath.Join(tempDir, "logs", "ralph", "bd-123-feature-ralph-tidy-parser-help.log")
-	data, readErr := os.ReadFile(logPath)
+	workDir := filepath.Join(tempDir, workDirFor(item))
+	outputPath := filepath.Join(workDir, "output.md")
+	data, readErr := os.ReadFile(outputPath)
 	if readErr != nil {
-		t.Fatalf("ReadFile(%q) error = %v", logPath, readErr)
+		t.Fatalf("ReadFile(%q) error = %v", outputPath, readErr)
 	}
 
 	got := string(data)
 	if !strings.Contains(got, "agent says hi\n") {
-		t.Fatalf("log missing worker output: %q", got)
+		t.Fatalf("output missing worker output: %q", got)
 	}
-	if !strings.Contains(got, "\n7\n") {
-		t.Fatalf("log missing exit code 7: %q", got)
+
+	promptBytes, readErr := os.ReadFile(filepath.Join(workDir, "prompt.md"))
+	if readErr != nil {
+		t.Fatalf("ReadFile(prompt.md) error = %v", readErr)
 	}
-	if !strings.Contains(got, "Perform the following:\nWiggum: ralph\n") {
-		t.Fatalf("log missing prompt: %q", got)
+	if !strings.Contains(string(promptBytes), "Perform the following:\nWiggum: ralph\n") {
+		t.Fatalf("prompt missing prompt contents: %q", string(promptBytes))
+	}
+
+	statusBytes, readErr := os.ReadFile(filepath.Join(workDir, "status.json"))
+	if readErr != nil {
+		t.Fatalf("ReadFile(status.json) error = %v", readErr)
+	}
+	var status workStatus
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("json.Unmarshal(status.json) error = %v", err)
+	}
+	if status.ExitCode != 7 {
+		t.Fatalf("status exit code = %d, want 7", status.ExitCode)
+	}
+	if status.Instruction != "codex exec - < logs/bd-123-Tidy-parser-help/prompt.md" {
+		t.Fatalf("status instruction = %q", status.Instruction)
 	}
 }
 
-func TestPerformDryRunWorkWritesLog(t *testing.T) {
+func TestPerformDryRunWorkWritesArtifacts(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
@@ -231,23 +255,78 @@ func TestPerformDryRunWorkWritesLog(t *testing.T) {
 		t.Fatalf("performDryRunWork() error = %v", err)
 	}
 
-	logPath := filepath.Join(tempDir, "logs", "jane", "bd-456-feature-jane-simulate-parser-help.log")
-	data, err := os.ReadFile(logPath)
+	workDir := filepath.Join(tempDir, workDirFor(item))
+	data, err := os.ReadFile(filepath.Join(workDir, "output.md"))
 	if err != nil {
-		t.Fatalf("ReadFile(%q) error = %v", logPath, err)
+		t.Fatalf("ReadFile(output.md) error = %v", err)
 	}
 
 	got := string(data)
 	if !strings.Contains(got, "dry-run; sleep 7\n") {
-		t.Fatalf("log missing dry-run process output: %q", got)
+		t.Fatalf("output missing dry-run process output: %q", got)
 	}
-	if !strings.Contains(got, "\n0\n") {
-		t.Fatalf("log missing exit code 0: %q", got)
+
+	inputBytes, err := os.ReadFile(filepath.Join(workDir, "input.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(input.md) error = %v", err)
 	}
-	if !strings.Contains(got, "Dry Run: true\n") {
-		t.Fatalf("log missing dry-run prompt contents: %q", got)
+	if !strings.Contains(string(inputBytes), "Dry Run: true\n") {
+		t.Fatalf("input missing dry-run packet contents: %q", string(inputBytes))
 	}
-	if !strings.Contains(got, "Branch Switched: false\n") {
-		t.Fatalf("log missing correct branch switched value: %q", got)
+
+	statusBytes, err := os.ReadFile(filepath.Join(workDir, "status.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(status.json) error = %v", err)
 	}
+	var status workStatus
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("json.Unmarshal(status.json) error = %v", err)
+	}
+	if status.ExitCode != 0 {
+		t.Fatalf("status exit code = %d, want 0", status.ExitCode)
+	}
+	if status.Branch != "feature/jane/simulate-parser-help" {
+		t.Fatalf("status branch = %q", status.Branch)
+	}
+	if status.Instruction != "echo 'dry-run; sleep 7'" {
+		t.Fatalf("status instruction = %q", status.Instruction)
+	}
+}
+
+func installFakeCodex(t *testing.T, dir string, exitCode int, output string) {
+	t.Helper()
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", binDir, err)
+	}
+
+	scriptPath := filepath.Join(binDir, "codex")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" != \"exec\" ] || [ \"$2\" != \"-\" ]; then\n" +
+		"  echo \"unexpected args: $*\" >&2\n" +
+		"  exit 99\n" +
+		"fi\n" +
+		"cat >/dev/null\n" +
+		"printf '%s' " + shellQuote(output) + "\n" +
+		"exit " + strconv.Itoa(exitCode) + "\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", scriptPath, err)
+	}
+
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func mustParseRFC3339(t *testing.T, value string) time.Time {
+	t.Helper()
+
+	parsed, err := time.Parse(time.RFC3339, value)
+	if err != nil {
+		t.Fatalf("time.Parse(%q) error = %v", value, err)
+	}
+	return parsed
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

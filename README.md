@@ -59,24 +59,9 @@ Open 3 terminals and `export PATH=./bin:$PATH` in each
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
 export PATH=./bin:$PATH
-wiggum loop -name ralph -max 0 -dryrun -sleep 1s
+wiggum loop -name ralph -max 0 -dryrun 5 -sleep 1
 ```
 
-```bash
-# name is jane and jane works half speed
-# max is 0 (loop till done)
-# dryrun means dont really do the work but simulate it
-export PATH=./bin:$PATH
-wiggum loop -name jane -max 0 -dryrun -sleep 2s
-```
-
-```bash
-# name is manpreet and manpreet takes their time
-# max is 0 (loop till done)
-# dryrun means dont really do the work but simulate it
-export PATH=./bin:$PATH
-wiggum loop -name manpreet -max 0 -dryrun -sleep 4s
-```
 
 Refresh the kanban
 
