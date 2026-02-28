@@ -184,3 +184,40 @@ func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
 		t.Fatalf("log missing prompt: %q", got)
 	}
 }
+
+func TestPerformDryRunWorkWritesLog(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
+
+	item := issue{
+		ID:          "bd-456",
+		Title:       "Simulate parser help",
+		Description: "Update the help output",
+		Acceptance:  "help prints usage|tests pass",
+		Status:      "open",
+		Priority:    2,
+		IssueType:   "task",
+	}
+
+	if err := performDryRunWork(item, "jane", "feature/jane/simulate-parser-help", 0); err != nil {
+		t.Fatalf("performDryRunWork() error = %v", err)
+	}
+
+	logPath := filepath.Join(tempDir, "logs", "jane", "bd-456-feature-jane-simulate-parser-help.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", logPath, err)
+	}
+
+	got := string(data)
+	if !strings.Contains(got, "dry-run simulation: skipped agent call for bd-456\n") {
+		t.Fatalf("log missing dry-run transcript: %q", got)
+	}
+	if !strings.Contains(got, "\n0\n") {
+		t.Fatalf("log missing exit code 0: %q", got)
+	}
+	if !strings.Contains(got, "Dry Run: true\n") {
+		t.Fatalf("log missing dry-run prompt contents: %q", got)
+	}
+}

@@ -156,7 +156,9 @@ func runLoop(args []string) error {
 		printWorkPacket(full, name, branchName, true, branched, dryRun)
 
 		if dryRun {
-			time.Sleep(sleepDur)
+			if err := performDryRunWork(full, name, branchName, sleepDur); err != nil {
+				return err
+			}
 		} else {
 			if err := performWork(full, name, branchName); err != nil {
 				return err
@@ -406,6 +408,17 @@ func performWork(item issue, name, branch string) error {
 		return fmt.Errorf("worker command failed for %s: %w", item.ID, err)
 	}
 	return nil
+}
+
+func performDryRunWork(item issue, name, branch string, sleepDur time.Duration) error {
+	startedAt := time.Now()
+	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, false, true))
+	if sleepDur > 0 {
+		time.Sleep(sleepDur)
+	}
+	completedAt := time.Now()
+	transcript := fmt.Sprintf("dry-run simulation: skipped agent call for %s\n", item.ID)
+	return writeAgentLog(item.ID, name, branch, prompt, transcript, startedAt, completedAt, 0)
 }
 
 func closeIssue(id, name string, dryRun bool) error {
