@@ -27,21 +27,21 @@ var (
 const additionalContextAC = "Review docs/DESIGN.md, USER_GUIDE.md, and docs/BEADS-RULES.md for additional context."
 
 type issue struct {
-	kind           issueType
-	title          string
-	titleLine      int
-	id             string
-	idLine         int
-	description    string
+	kind            issueType
+	title           string
+	titleLine       int
+	id              string
+	idLine          int
+	description     string
 	descriptionLine int
-	acceptance     []fieldLine
-	priority       string
-	priorityLine   int
-	dependsOn      []string
-	dependsLine    int
-	parentID       string
-	parentLine     int
-	lines          []fieldLine
+	acceptance      []fieldLine
+	priority        string
+	priorityLine    int
+	dependsOn       []string
+	dependsLine     int
+	parentID        string
+	parentLine      int
+	lines           []fieldLine
 }
 
 type fieldLine struct {
@@ -344,7 +344,7 @@ func buildCommand(item issue) string {
 	}
 
 	if len(item.acceptance) > 0 {
-		args = append(args, "--acceptance", shellQuote(strings.Join(normalizeAcceptance(item.acceptance), " | ")))
+		args = append(args, "--acceptance", shellQuote(strings.Join(normalizeAcceptance(item.acceptance), "\n")))
 	}
 
 	if item.parentID != "" {

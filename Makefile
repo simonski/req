@@ -7,7 +7,8 @@ help:
 	@printf "  make help    Print this usage message.\n"
 	@printf "  make tools   Build all Go tools under tools/ into ./bin.\n"
 	@printf "  make clean   Remove built binaries from ./bin.\n"
-	@printf "  make reset   Reset beads completely.\n"
+	@printf "  make setup   Setup beads.\n"
+	@printf "  make reset   Delete all beads.\n"
 	@printf "\n"
 
 tools:
@@ -22,7 +23,6 @@ tools:
 setup:
 	@bd init --prefix req
 	@bd sync
-	@bd migrate sync beads-sync
 	@bd ready
 	@echo Restart VSCode
 

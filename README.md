@@ -55,15 +55,16 @@ Observe the kanban
 
 ## simulate a beads loop
 
-Open 3 terminals and `export PATH=./bin:$PATH` in each
-
 ```bash
 # name is ralph and ralph works fast
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
 export PATH=./bin:$PATH
-wiggum loop -name ralph -max 0 -dryrun 5 -sleep 1
+wiggum loop -name ralph -max 1 -dryrun 5 -sleep 1
+
+wiggum loop -name ralph -max 1 -dryrun 5 -sleep 1
 ```
+
 
 
 Refresh the kanban

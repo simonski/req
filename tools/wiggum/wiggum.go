@@ -49,13 +49,15 @@ type dep struct {
 }
 
 type workStatus struct {
-	StartedAt   string `json:"started_at"`
-	CompletedAt string `json:"completed_at"`
-	ExitCode    int    `json:"exit_code"`
-	Branch      string `json:"branch"`
-	BeadID      string `json:"bead_id"`
-	Title       string `json:"title"`
-	Instruction string `json:"instruction"`
+	StartedAt       string `json:"started_at"`
+	CompletedAt     string `json:"completed_at"`
+	ExitCode        int    `json:"exit_code"`
+	Branch          string `json:"branch"`
+	BeadID          string `json:"bead_id"`
+	Title           string `json:"title"`
+	Instruction     string `json:"instruction"`
+	BeadStatusStart string `json:"bead_status_start"`
+	BeadStatusEnd   string `json:"bead_status_end"`
 }
 
 var logicalIDPattern = regexp.MustCompile(`(?i)\[Logical ID:\s*([^\]]+)\]`)
@@ -156,7 +158,7 @@ func runLoop(args []string) error {
 			return err
 		}
 
-		branchName := branchNameFor(full)
+		branchName := branchNameFor(name, full)
 		branched := false
 		if !noBranch && !dryRun {
 			if err := switchBranch(branchName); err != nil {
@@ -179,6 +181,9 @@ func runLoop(args []string) error {
 
 		if err := closeIssue(full.ID, name, dryRun); err != nil {
 			return err
+		}
+		if err := updateWorkStatusEnd(full, branchName, "closed"); err != nil {
+			return fmt.Errorf("failed to update work status for %s: %w", full.ID, err)
 		}
 
 		processed++
@@ -239,7 +244,7 @@ func runCheck(args []string) error {
 		return err
 	}
 
-	branchName := branchNameFor(full)
+	branchName := branchNameFor(name, full)
 	fmt.Print(renderWorkPacket(full, name, branchName, false, false, false))
 	return nil
 }
@@ -462,7 +467,7 @@ func runWorkCommand(item issue, name, branch string, branched, dryRun bool, dryR
 	err = cmd.Run()
 	completedAt := time.Now()
 	exitCode := exitCodeFor(err)
-	if logErr := writeWorkArtifacts(workDir, item, branch, instruction, transcript.String(), startedAt, completedAt, exitCode); logErr != nil {
+	if logErr := writeWorkArtifacts(workDir, item, branch, instruction, transcript.String(), startedAt, completedAt, exitCode, item.Status, item.Status); logErr != nil {
 		if err != nil {
 			return fmt.Errorf("%w (also failed to write work artifacts: %v)", err, logErr)
 		}
@@ -483,7 +488,7 @@ func closeIssue(id, name string, dryRun bool) error {
 	return nil
 }
 
-func branchNameFor(item issue) string {
+func branchNameFor(name string, item issue) string {
 	logicalID := item.ExternalRef
 	if logicalID == "" {
 		if match := logicalIDPattern.FindStringSubmatch(item.Description); len(match) == 2 {
@@ -495,13 +500,13 @@ func branchNameFor(item issue) string {
 	title := slugify(item.Title)
 	switch {
 	case prefix != "" && title != "":
-		return prefix + "-" + title
+		return "feature/" + slugify(name) + "/" + prefix + "-" + title
 	case title != "":
-		return title
+		return "feature/" + slugify(name) + "/" + title
 	case prefix != "":
-		return prefix
+		return "feature/" + slugify(name) + "/" + prefix
 	default:
-		return slugify(item.ID)
+		return "feature/" + slugify(name) + "/" + slugify(item.ID)
 	}
 }
 
@@ -635,20 +640,22 @@ func (l *lockedBuffer) String() string {
 	return l.b.String()
 }
 
-func writeWorkArtifacts(workDir string, item issue, branch, instruction, transcript string, startedAt, completedAt time.Time, exitCode int) error {
+func writeWorkArtifacts(workDir string, item issue, branch, instruction, transcript string, startedAt, completedAt time.Time, exitCode int, beadStatusStart, beadStatusEnd string) error {
 	outputPath := filepath.Join(workDir, "output.md")
 	if err := os.WriteFile(outputPath, []byte(transcript), 0o644); err != nil {
 		return err
 	}
 
 	status := workStatus{
-		StartedAt:   startedAt.Format(time.RFC3339Nano),
-		CompletedAt: completedAt.Format(time.RFC3339Nano),
-		ExitCode:    exitCode,
-		Branch:      branch,
-		BeadID:      item.ID,
-		Title:       item.Title,
-		Instruction: instruction,
+		StartedAt:       startedAt.Format(time.RFC3339Nano),
+		CompletedAt:     completedAt.Format(time.RFC3339Nano),
+		ExitCode:        exitCode,
+		Branch:          branch,
+		BeadID:          item.ID,
+		Title:           item.Title,
+		Instruction:     instruction,
+		BeadStatusStart: beadStatusStart,
+		BeadStatusEnd:   beadStatusEnd,
 	}
 
 	statusBytes, err := json.MarshalIndent(status, "", "  ")
@@ -657,6 +664,31 @@ func writeWorkArtifacts(workDir string, item issue, branch, instruction, transcr
 	}
 	statusBytes = append(statusBytes, '\n')
 	return os.WriteFile(filepath.Join(workDir, "status.json"), statusBytes, 0o644)
+}
+
+func updateWorkStatusEnd(item issue, branch, endStatus string) error {
+	workDir := workDirFor(item)
+	statusPath := filepath.Join(workDir, "status.json")
+
+	data, err := os.ReadFile(statusPath)
+	if err != nil {
+		return err
+	}
+
+	var status workStatus
+	if err := json.Unmarshal(data, &status); err != nil {
+		return err
+	}
+
+	status.Branch = branch
+	status.BeadStatusEnd = endStatus
+
+	statusBytes, err := json.MarshalIndent(status, "", "  ")
+	if err != nil {
+		return err
+	}
+	statusBytes = append(statusBytes, '\n')
+	return os.WriteFile(statusPath, statusBytes, 0o644)
 }
 
 func workDirFor(item issue) string {
@@ -714,7 +746,9 @@ func exitCodeFor(err error) int {
 }
 
 func splitAcceptance(input string) []string {
-	parts := strings.Split(input, "|")
+	input = strings.ReplaceAll(input, "\r\n", "\n")
+	input = strings.ReplaceAll(input, "|", "\n")
+	parts := strings.Split(input, "\n")
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
 		part = strings.TrimSpace(part)

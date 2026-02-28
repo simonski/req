@@ -73,22 +73,11 @@ modify wiggum so that it
     it writes start/stop/exit code/branch/bead id/title/instruction to $folder/status.json
     it invokes and instructs the agent using "codex exec - < path/to/prompt.md" where the prompt.md is the prompt
 
-FULL PROMPT
------------
+when run in dry-run the outcome should be the same except the instruction won't be "codex" it'll be the echo/sleep
 
-FULL STDIN/STDOUT
------------
-
-TIME STARTED:
------------
-
-TIME COMPLETED:
------------
-
-EXIT CODE:
------------
-
-BEAD ID:
------------
+>>>>>
+once a job claims to be finished
+it should create a clone of it that is only for independent testing
+>>>>>
 
 The filename should be logs/<wiggum-name>/<bead-id>-<branch-name>.log - replace any path like characters with a hyphen.

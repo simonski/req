@@ -97,6 +97,24 @@ func TestRenderPromptUsesTemplatePlaceholder(t *testing.T) {
 	}
 }
 
+func TestSplitAcceptanceUsesNewlines(t *testing.T) {
+	t.Parallel()
+
+	got := splitAcceptance("first criterion\nsecond criterion")
+	if len(got) != 2 || got[0] != "first criterion" || got[1] != "second criterion" {
+		t.Fatalf("splitAcceptance() = %#v", got)
+	}
+}
+
+func TestSplitAcceptanceStillToleratesPipes(t *testing.T) {
+	t.Parallel()
+
+	got := splitAcceptance("first criterion|second criterion")
+	if len(got) != 2 || got[0] != "first criterion" || got[1] != "second criterion" {
+		t.Fatalf("splitAcceptance() = %#v", got)
+	}
+}
+
 func TestRenderWorkPacketIsPromptWrapped(t *testing.T) {
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
 
@@ -104,7 +122,7 @@ func TestRenderWorkPacketIsPromptWrapped(t *testing.T) {
 		ID:          "bd-123",
 		Title:       "Tidy parser help",
 		Description: "Update the help output",
-		Acceptance:  "help prints usage|tests pass",
+		Acceptance:  "help prints usage\ntests pass",
 		Status:      "open",
 		Priority:    2,
 		IssueType:   "task",
@@ -116,6 +134,22 @@ func TestRenderWorkPacketIsPromptWrapped(t *testing.T) {
 	}
 	if !strings.Contains(got, "ID: bd-123\n") {
 		t.Fatalf("wrapped packet missing bead contents: %q", got)
+	}
+}
+
+func TestBranchNameForUsesFeaturePrefix(t *testing.T) {
+	t.Parallel()
+
+	item := issue{
+		ID:          "bd-123",
+		Title:       "Tidy parser help",
+		ExternalRef: "e2-s2",
+	}
+
+	got := branchNameFor("ralph", item)
+	want := "feature/ralph/e2-s2-tidy-parser-help"
+	if got != want {
+		t.Fatalf("branchNameFor() = %q, want %q", got, want)
 	}
 }
 
@@ -150,6 +184,8 @@ func TestWriteWorkArtifactsIncludesExpectedFiles(t *testing.T) {
 		mustParseRFC3339(t, startedAt),
 		mustParseRFC3339(t, completedAt),
 		7,
+		"in_progress",
+		"closed",
 	); err != nil {
 		t.Fatalf("writeWorkArtifacts() error = %v", err)
 	}
@@ -174,7 +210,7 @@ func TestWriteWorkArtifactsIncludesExpectedFiles(t *testing.T) {
 		t.Fatalf("json.Unmarshal(status.json) error = %v", err)
 	}
 
-	if got.StartedAt != startedAt || got.CompletedAt != completedAt || got.ExitCode != 7 || got.Branch != "feature/ralph/fix-thing" || got.BeadID != "bd/123" || got.Title != "Fix: thing" || got.Instruction != "codex exec - < logs/bd-123-Fix-thing/prompt.md" {
+	if got.StartedAt != startedAt || got.CompletedAt != completedAt || got.ExitCode != 7 || got.Branch != "feature/ralph/fix-thing" || got.BeadID != "bd/123" || got.Title != "Fix: thing" || got.Instruction != "codex exec - < logs/bd-123-Fix-thing/prompt.md" || got.BeadStatusStart != "in_progress" || got.BeadStatusEnd != "closed" {
 		t.Fatalf("status.json = %+v", got)
 	}
 }
@@ -189,7 +225,7 @@ func TestPerformWorkWritesArtifactsOnWorkerFailure(t *testing.T) {
 		ID:          "bd-123",
 		Title:       "Tidy parser help",
 		Description: "Update the help output",
-		Acceptance:  "help prints usage|tests pass",
+		Acceptance:  "help prints usage\ntests pass",
 		Status:      "open",
 		Priority:    2,
 		IssueType:   "task",
@@ -234,6 +270,12 @@ func TestPerformWorkWritesArtifactsOnWorkerFailure(t *testing.T) {
 	if status.Instruction != "codex exec - < logs/bd-123-Tidy-parser-help/prompt.md" {
 		t.Fatalf("status instruction = %q", status.Instruction)
 	}
+	if status.Branch != "feature/ralph/tidy-parser-help" {
+		t.Fatalf("status branch = %q", status.Branch)
+	}
+	if status.BeadStatusStart != "open" || status.BeadStatusEnd != "open" {
+		t.Fatalf("status bead statuses = %q -> %q", status.BeadStatusStart, status.BeadStatusEnd)
+	}
 }
 
 func TestPerformDryRunWorkWritesArtifacts(t *testing.T) {
@@ -245,7 +287,7 @@ func TestPerformDryRunWorkWritesArtifacts(t *testing.T) {
 		ID:          "bd-456",
 		Title:       "Simulate parser help",
 		Description: "Update the help output",
-		Acceptance:  "help prints usage|tests pass",
+		Acceptance:  "help prints usage\ntests pass",
 		Status:      "open",
 		Priority:    2,
 		IssueType:   "task",
@@ -290,6 +332,52 @@ func TestPerformDryRunWorkWritesArtifacts(t *testing.T) {
 	}
 	if status.Instruction != "echo 'dry-run; sleep 7'" {
 		t.Fatalf("status instruction = %q", status.Instruction)
+	}
+	if status.BeadStatusStart != "open" || status.BeadStatusEnd != "open" {
+		t.Fatalf("status bead statuses = %q -> %q", status.BeadStatusStart, status.BeadStatusEnd)
+	}
+}
+
+func TestUpdateWorkStatusEndRewritesStatus(t *testing.T) {
+	tempDir := t.TempDir()
+	t.Chdir(tempDir)
+
+	item := issue{ID: "bd-123", Title: "Fix: thing"}
+	workDir := workDirFor(item)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", workDir, err)
+	}
+
+	if err := writeWorkArtifacts(
+		workDir,
+		item,
+		"feature/ralph/fix-thing",
+		"codex exec - < logs/bd-123-Fix-thing/prompt.md",
+		"agent output\n",
+		mustParseRFC3339(t, "2026-02-28T11:00:00Z"),
+		mustParseRFC3339(t, "2026-02-28T11:02:00Z"),
+		0,
+		"in_progress",
+		"in_progress",
+	); err != nil {
+		t.Fatalf("writeWorkArtifacts() error = %v", err)
+	}
+
+	if err := updateWorkStatusEnd(item, "feature/ralph/fix-thing", "closed"); err != nil {
+		t.Fatalf("updateWorkStatusEnd() error = %v", err)
+	}
+
+	statusBytes, err := os.ReadFile(filepath.Join(workDir, "status.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(status.json) error = %v", err)
+	}
+
+	var status workStatus
+	if err := json.Unmarshal(statusBytes, &status); err != nil {
+		t.Fatalf("json.Unmarshal(status.json) error = %v", err)
+	}
+	if status.BeadStatusStart != "in_progress" || status.BeadStatusEnd != "closed" {
+		t.Fatalf("status bead statuses = %q -> %q", status.BeadStatusStart, status.BeadStatusEnd)
 	}
 }
 
