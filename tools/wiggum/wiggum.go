@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultReadyLimit = 100
-	defaultDryRunSleep = time.Second
+	defaultDryRunSleep = 10 * time.Second
 )
 
 type issue struct {

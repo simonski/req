@@ -44,24 +44,24 @@ Observe the kanban
 Open 3 terminals and `export PATH=./bin:$PATH` in each
 
 ```bash
-# name is ralph
+# name is ralph and ralph works fast
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name ralph -max 0 -dryrun
+wiggum loop -name ralph -max 0 -dryrun -sleep 1
 ```
 
 ```bash
-# name is jane
+# name is jane and jane works half speed
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name jane -max 0 -dryrun
+wiggum loop -name jane -max 0 -dryrun -sleep 2
 ```
 
 ```bash
-# name is manpreet
+# name is manpreet and manpreet takes their time
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name manpreet -max 0 -dryrun
+wiggum loop -name manpreet -max 0 -dryrun -sleep 4
 ```
 
 Refresh the kanban
