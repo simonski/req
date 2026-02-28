@@ -20,6 +20,7 @@ tools:
 	done
 
 reset:
+	@bd reset --force
 	@bd init --prefix req
 	@bd sync
 	@bd migrate sync beads-sync

@@ -5,13 +5,24 @@
 ## Beads Setup
 
 ```bash
+# if on an intel mac
 go install github.com/steveyegge/beads@v0.47.1
-bd init --prefix req
-bd sync
-bd migrate sync beads-sync
-bd ready
+
+# else
+go install github.com/steveyegge/beads@latest
+
+make reset
 make tools
 ```
+
+See the beads - should be zero beads.   
+
+> Note: if you run `make reset` and you use `VSCode` I advise you to restart VSCode as the beads daemon is a bit flaky.
+
+```bash
+bd count
+```
+
 
 ## Create requirements
 
@@ -23,10 +34,10 @@ parser -f REQUIREMENTS.md > commands.sh
 bash commands.sh
 ```
 
-See the beads
+See the beads - should be 65 beads.
 
 ```bash
-bd list
+bd count
 ```
 
 ## see what ralph would do
@@ -47,21 +58,24 @@ Open 3 terminals and `export PATH=./bin:$PATH` in each
 # name is ralph and ralph works fast
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name ralph -max 0 -dryrun -sleep 1
+export PATH=./bin:$PATH
+wiggum loop -name ralph -max 0 -dryrun -sleep 1s
 ```
 
 ```bash
 # name is jane and jane works half speed
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name jane -max 0 -dryrun -sleep 2
+export PATH=./bin:$PATH
+wiggum loop -name jane -max 0 -dryrun -sleep 2s
 ```
 
 ```bash
 # name is manpreet and manpreet takes their time
 # max is 0 (loop till done)
 # dryrun means dont really do the work but simulate it
-wiggum loop -name manpreet -max 0 -dryrun -sleep 4
+export PATH=./bin:$PATH
+wiggum loop -name manpreet -max 0 -dryrun -sleep 4s
 ```
 
 Refresh the kanban
