@@ -5,9 +5,11 @@
 ## Beads Setup
 
 ```bash
+go install github.com/steveyegge/beads@v0.47.1
 bd init --prefix req
 bd doctor
 bd sync
+bd migrate sync beads-sync
 ```
 
 
