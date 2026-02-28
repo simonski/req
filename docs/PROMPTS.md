@@ -13,7 +13,7 @@ DEPENDS-ON: E2, E4
 
 <indent for stories "in" the epic (the story ID should increment and be EPIC-STORY)>
     STORY: title
-    ID: E1-S1, E1-S2, E1-S3 etc.
+    ID: E1-S1, E1-2, E1-S3 etc.
     DESCRIPTION: description
     AC: list of acceptance criteria
     PRIORITY: 1-N (1 highest, do this first)
@@ -32,5 +32,7 @@ Ensure the acceptance critera contains
 
 3. Write/rewrite a parser go program that translates a requirements.md into beads commands (but do not call beads). It should just be a single go file runnable as "go run parser.go -f REQUIREMENTS.md" which writes to stdout all the beads commands with double- newlines between beads.   It should read yhe whole requirements, validate they are correct and have referntial integrity where they refer to other EPICS or STORIES, call out the error-line if there is one, exit 1 if there is a problem, or just print the commands and exit 0.
 
+The output of the parser.go has problems when running trying to create beads:
+- The problem is beads creates entryies with beads ids.  What shoudl we do as the commands are invalid?
 
 

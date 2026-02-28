@@ -320,11 +320,11 @@ func validateDependencies(item issue, byID map[string]issue) error {
 func buildCommand(item issue) string {
 	args := []string{
 		"bd create",
-		"--id", shellQuote(item.id),
 		"--type", shellQuote(string(item.kind)),
 		"--title", shellQuote(item.title),
-		"--description", shellQuote(normalizeWhitespace(item.description)),
+		"--description", shellQuote(buildDescription(item)),
 		"--priority", shellQuote(mapPriority(item.priority)),
+		"--external-ref", shellQuote(item.id),
 	}
 
 	if len(item.acceptance) > 0 {
@@ -332,14 +332,16 @@ func buildCommand(item issue) string {
 	}
 
 	if item.parentID != "" {
-		args = append(args, "--parent", shellQuote(item.parentID))
+		args = append(args, "--parent", shellVar(item.parentID))
 	}
 
 	if len(item.dependsOn) > 0 {
-		args = append(args, "--deps", shellQuote(strings.Join(item.dependsOn, ",")))
+		args = append(args, "--deps", shellDeps(item.dependsOn))
 	}
 
-	return strings.Join(args, " ")
+	args = append(args, "--silent")
+
+	return fmt.Sprintf("%s=$(%s)", shellName(item.id), strings.Join(args, " "))
 }
 
 func normalizeAcceptance(values []fieldLine) []string {
@@ -380,6 +382,10 @@ func normalizeWhitespace(value string) string {
 	return strings.Join(strings.Fields(value), " ")
 }
 
+func buildDescription(item issue) string {
+	return fmt.Sprintf("[Logical ID: %s] %s", item.id, normalizeWhitespace(item.description))
+}
+
 func parseDependsOn(value string) []string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -416,6 +422,23 @@ func mapPriority(input string) string {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func shellName(value string) string {
+	replacer := strings.NewReplacer("-", "_", " ", "_")
+	return replacer.Replace(value)
+}
+
+func shellVar(logicalID string) string {
+	return fmt.Sprintf("\"${%s}\"", shellName(logicalID))
+}
+
+func shellDeps(deps []string) string {
+	parts := make([]string, 0, len(deps))
+	for _, dep := range deps {
+		parts = append(parts, fmt.Sprintf("${%s}", shellName(dep)))
+	}
+	return fmt.Sprintf("\"%s\"", strings.Join(parts, ","))
 }
 
 func exitErr(err error) {
