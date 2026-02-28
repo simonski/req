@@ -24,7 +24,7 @@ var (
 	storyIDPattern  = regexp.MustCompile(`^E\d+-S\d+$`)
 )
 
-const additionalContextAC = "Review docs/DESIGN.md and USER_GUIDE.md for additional context."
+const additionalContextAC = "Review docs/DESIGN.md, USER_GUIDE.md, and docs/BEADS-RULES.md for additional context."
 
 type issue struct {
 	kind           issueType

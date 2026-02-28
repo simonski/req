@@ -7,19 +7,64 @@
 ```bash
 go install github.com/steveyegge/beads@v0.47.1
 bd init --prefix req
-bd doctor
 bd sync
 bd migrate sync beads-sync
 bd ready
-go run parser.go -f REQUIREMENTS.md > commands.sh
+make tools
+```
+
+## Create requirements
+
+This will generate beads instructions from the requirements document.
+
+```bash
+export PATH=./bin:$PATH
+parser -f REQUIREMENTS.md > commands.sh
 bash commands.sh
 ```
 
-## building
+See the beads
 
 ```bash
-go run wiggum.go -no-claim -no-branch
+bd list
 ```
+
+## see what ralph would do
+
+```bash
+wiggum check -name ralph check
+```
+
+## Open VSCode and install a beads plugin
+
+Observe the kanban
+
+## simulate a beads loop
+
+Open 3 terminals and `export PATH=./bin:$PATH` in each
+
+```bash
+# name is ralph
+# max is 0 (loop till done)
+# dryrun means dont really do the work but simulate it
+wiggum loop -name ralph -max 0 -dryrun
+```
+
+```bash
+# name is jane
+# max is 0 (loop till done)
+# dryrun means dont really do the work but simulate it
+wiggum loop -name jane -max 0 -dryrun
+```
+
+```bash
+# name is manpreet
+# max is 0 (loop till done)
+# dryrun means dont really do the work but simulate it
+wiggum loop -name manpreet -max 0 -dryrun
+```
+
+Refresh the kanban
 
 ## Building
 

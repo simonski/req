@@ -138,7 +138,7 @@ func runLoop(args []string) error {
 
 		branchName := branchNameFor(full)
 		branched := false
-		if !noBranch {
+		if !noBranch && !dryRun {
 			if err := switchBranch(branchName); err != nil {
 				return err
 			}

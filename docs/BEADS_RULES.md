@@ -1,0 +1,1 @@
+- prefix the branch with the feature/<wiggum-name> so - "feature/<wiggum-name>/<branch-name>"
