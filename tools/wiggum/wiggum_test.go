@@ -56,6 +56,15 @@ func TestBuildAgentCommandUsesDirectExecForMultipleArguments(t *testing.T) {
 	}
 }
 
+func TestRunLoopRequiresAgentWhenNotDryRun(t *testing.T) {
+	t.Parallel()
+
+	err := runLoop([]string{"-name", "ralph", "-max", "1"})
+	if err == nil || !strings.Contains(err.Error(), "missing required -agent flag") {
+		t.Fatalf("runLoop() error = %v, want missing required -agent flag", err)
+	}
+}
+
 func TestRenderPromptUsesDefaultTemplate(t *testing.T) {
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
 
@@ -149,7 +158,6 @@ func TestWriteAgentLogIncludesRequiredSections(t *testing.T) {
 func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
 	tempDir := t.TempDir()
 	t.Chdir(tempDir)
-	t.Setenv("WIGGUM_WORK_CMD", "printf 'agent says hi\\n'; cat >/dev/null; exit 7")
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
 
 	item := issue{
@@ -162,7 +170,7 @@ func TestPerformWorkWritesLogOnWorkerFailure(t *testing.T) {
 		IssueType:   "task",
 	}
 
-	err := performWork(item, "ralph", "feature/ralph/tidy-parser-help")
+	err := performWork(item, "ralph", "feature/ralph/tidy-parser-help", true, "printf 'agent says hi\\n'; cat >/dev/null; exit 7")
 	if err == nil {
 		t.Fatal("performWork() error = nil, want non-nil")
 	}
@@ -200,7 +208,7 @@ func TestPerformDryRunWorkWritesLog(t *testing.T) {
 		IssueType:   "task",
 	}
 
-	if err := performDryRunWork(item, "jane", "feature/jane/simulate-parser-help", 0); err != nil {
+	if err := performDryRunWork(item, "jane", "feature/jane/simulate-parser-help", false, 0); err != nil {
 		t.Fatalf("performDryRunWork() error = %v", err)
 	}
 
@@ -211,13 +219,16 @@ func TestPerformDryRunWorkWritesLog(t *testing.T) {
 	}
 
 	got := string(data)
-	if !strings.Contains(got, "dry-run simulation: skipped agent call for bd-456\n") {
-		t.Fatalf("log missing dry-run transcript: %q", got)
+	if !strings.Contains(got, "dry-run\n") {
+		t.Fatalf("log missing dry-run process output: %q", got)
 	}
 	if !strings.Contains(got, "\n0\n") {
 		t.Fatalf("log missing exit code 0: %q", got)
 	}
 	if !strings.Contains(got, "Dry Run: true\n") {
 		t.Fatalf("log missing dry-run prompt contents: %q", got)
+	}
+	if !strings.Contains(got, "Branch Switched: false\n") {
+		t.Fatalf("log missing correct branch switched value: %q", got)
 	}
 }

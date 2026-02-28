@@ -85,24 +85,23 @@ func runLoop(args []string) error {
 		name       string
 		max        int
 		dryRun     bool
+		agentCmd   string
 		readyLimit int
 		sleepDur   time.Duration
 		noBranch   bool
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -max 1 [-dryrun]\n\n")
+		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -agent \"command\" -max 1 [-dryrun]\n\n")
 		fmt.Fprintf(fs.Output(), "Chooses the next best ready bead for the named wiggum, assigns it,\n")
 		fmt.Fprintf(fs.Output(), "creates or switches to a branch for the work, performs the work,\n")
 		fmt.Fprintf(fs.Output(), "closes the bead, and repeats.\n\n")
 		fmt.Fprintf(fs.Output(), "Flags:\n")
 		fs.PrintDefaults()
-		fmt.Fprintf(fs.Output(), "\nEnvironment:\n")
-		fmt.Fprintf(fs.Output(), "  WIGGUM_WORK_CMD   Optional command used to process a work packet in non-dry-run mode.\n")
-		fmt.Fprintf(fs.Output(), "                    The command receives the work packet on stdin.\n")
 	}
 
 	fs.StringVar(&name, "name", "", "unique wiggum name used for assignment")
+	fs.StringVar(&agentCmd, "agent", "", "full agent command used to process the work packet")
 	fs.IntVar(&max, "max", 1, "maximum number of issues to process (0 = forever)")
 	fs.BoolVar(&dryRun, "dryrun", false, "simulate work, sleep briefly, and close the bead")
 	fs.IntVar(&readyLimit, "limit", defaultReadyLimit, "maximum ready issues to consider per iteration")
@@ -118,6 +117,10 @@ func runLoop(args []string) error {
 	if name == "" {
 		fs.Usage()
 		return errors.New("missing required -name flag")
+	}
+	if !dryRun && strings.TrimSpace(agentCmd) == "" {
+		fs.Usage()
+		return errors.New("missing required -agent flag")
 	}
 
 	processed := 0
@@ -156,11 +159,11 @@ func runLoop(args []string) error {
 		printWorkPacket(full, name, branchName, true, branched, dryRun)
 
 		if dryRun {
-			if err := performDryRunWork(full, name, branchName, sleepDur); err != nil {
+			if err := performDryRunWork(full, name, branchName, branched, sleepDur); err != nil {
 				return err
 			}
 		} else {
-			if err := performWork(full, name, branchName); err != nil {
+			if err := performWork(full, name, branchName, branched, agentCmd); err != nil {
 				return err
 			}
 		}
@@ -234,8 +237,8 @@ func printUsage() {
 	fmt.Println("  wiggum agent \"entire command\"")
 	fmt.Println("  wiggum agent command [arg...]")
 	fmt.Println("  wiggum check -name fred")
-	fmt.Println("  wiggum loop -name fred -max 1")
-	fmt.Println("  wiggum loop -name fred -max 1 -dryrun")
+	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1")
+	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1 -dryrun")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  agent   Run an interactive coding agent command with stdio passed through.")
@@ -375,16 +378,33 @@ func showIssue(id string) (issue, error) {
 	return issues[0], nil
 }
 
-func performWork(item issue, name, branch string) error {
-	workCmd := strings.TrimSpace(os.Getenv("WIGGUM_WORK_CMD"))
-	if workCmd == "" {
-		return errors.New("WIGGUM_WORK_CMD is not set for non-dry-run execution")
+func performWork(item issue, name, branch string, branched bool, agentCmd string) error {
+	if strings.TrimSpace(agentCmd) == "" {
+		return errors.New("agent command is required")
 	}
+	err := runWorkCommand(item, name, branch, branched, false, agentCmd)
+	if err != nil {
+		return fmt.Errorf("worker command failed for %s: %w", item.ID, err)
+	}
+	return nil
+}
 
+func performDryRunWork(item issue, name, branch string, branched bool, sleepDur time.Duration) error {
+	if sleepDur > 0 {
+		time.Sleep(sleepDur)
+	}
+	return runWorkCommand(item, name, branch, branched, true, "echo 'dry-run'")
+}
+
+func runWorkCommand(item issue, name, branch string, branched, dryRun bool, command string) error {
 	startedAt := time.Now()
-	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, branch != "", false))
+	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, branched, dryRun))
 	transcript := &lockedBuffer{}
-	cmd := exec.Command("sh", "-c", workCmd)
+
+	cmd, err := buildAgentCommand([]string{command})
+	if err != nil {
+		return err
+	}
 	cmd.Stdin = strings.NewReader(prompt)
 	cmd.Stdout = io.MultiWriter(os.Stdout, transcript)
 	cmd.Stderr = io.MultiWriter(os.Stderr, transcript)
@@ -395,30 +415,16 @@ func performWork(item issue, name, branch string) error {
 		"WIGGUM_BRANCH="+branch,
 	)
 
-	err := cmd.Run()
+	err = cmd.Run()
 	completedAt := time.Now()
 	exitCode := exitCodeFor(err)
 	if logErr := writeAgentLog(item.ID, name, branch, prompt, transcript.String(), startedAt, completedAt, exitCode); logErr != nil {
 		if err != nil {
-			return fmt.Errorf("worker command failed for %s: %w (also failed to write log: %v)", item.ID, err, logErr)
+			return fmt.Errorf("%w (also failed to write log: %v)", err, logErr)
 		}
 		return fmt.Errorf("failed to write agent log for %s: %w", item.ID, logErr)
 	}
-	if err != nil {
-		return fmt.Errorf("worker command failed for %s: %w", item.ID, err)
-	}
-	return nil
-}
-
-func performDryRunWork(item issue, name, branch string, sleepDur time.Duration) error {
-	startedAt := time.Now()
-	prompt := renderPrompt(renderWorkPacket(item, name, branch, true, false, true))
-	if sleepDur > 0 {
-		time.Sleep(sleepDur)
-	}
-	completedAt := time.Now()
-	transcript := fmt.Sprintf("dry-run simulation: skipped agent call for %s\n", item.ID)
-	return writeAgentLog(item.ID, name, branch, prompt, transcript, startedAt, completedAt, 0)
+	return err
 }
 
 func closeIssue(id, name string, dryRun bool) error {
