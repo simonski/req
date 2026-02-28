@@ -65,6 +65,25 @@ func TestRunLoopRequiresAgentWhenNotDryRun(t *testing.T) {
 	}
 }
 
+func TestRunLoopDryRunFlagRequiresInteger(t *testing.T) {
+	t.Parallel()
+
+	err := runLoop([]string{"-name", "ralph", "-dryrun"})
+	if err == nil {
+		t.Fatal("runLoop() error = nil, want non-nil")
+	}
+}
+
+func TestDryRunCommandUsesProvidedSeconds(t *testing.T) {
+	t.Parallel()
+
+	got := dryRunCommand(7)
+	want := "echo 'dry-run; sleep 7'"
+	if got != want {
+		t.Fatalf("dryRunCommand() = %q, want %q", got, want)
+	}
+}
+
 func TestRenderPromptUsesDefaultTemplate(t *testing.T) {
 	t.Setenv("WIGGUM_PROMPT_TEMPLATE", "")
 
@@ -208,7 +227,7 @@ func TestPerformDryRunWorkWritesLog(t *testing.T) {
 		IssueType:   "task",
 	}
 
-	if err := performDryRunWork(item, "jane", "feature/jane/simulate-parser-help", false, 0); err != nil {
+	if err := performDryRunWork(item, "jane", "feature/jane/simulate-parser-help", false, 7); err != nil {
 		t.Fatalf("performDryRunWork() error = %v", err)
 	}
 
@@ -219,7 +238,7 @@ func TestPerformDryRunWorkWritesLog(t *testing.T) {
 	}
 
 	got := string(data)
-	if !strings.Contains(got, "dry-run\n") {
+	if !strings.Contains(got, "dry-run; sleep 7\n") {
 		t.Fatalf("log missing dry-run process output: %q", got)
 	}
 	if !strings.Contains(got, "\n0\n") {

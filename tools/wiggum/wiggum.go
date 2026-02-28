@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultReadyLimit     = 100
-	defaultDryRunSleep    = 10 * time.Second
+	defaultLoopSleepSecs  = 1
 	defaultPromptTemplate = "Perform the following:\n<BEAD>"
 )
 
@@ -84,15 +84,15 @@ func runLoop(args []string) error {
 	var (
 		name       string
 		max        int
-		dryRun     bool
+		dryRunSecs int
 		agentCmd   string
 		readyLimit int
-		sleepDur   time.Duration
+		sleepSecs  int
 		noBranch   bool
 	)
 
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -agent \"command\" -max 1 [-dryrun]\n\n")
+		fmt.Fprintf(fs.Output(), "Usage: wiggum loop -name fred -agent \"command\" -max 1 [-dryrun N]\n\n")
 		fmt.Fprintf(fs.Output(), "Chooses the next best ready bead for the named wiggum, assigns it,\n")
 		fmt.Fprintf(fs.Output(), "creates or switches to a branch for the work, performs the work,\n")
 		fmt.Fprintf(fs.Output(), "closes the bead, and repeats.\n\n")
@@ -103,9 +103,9 @@ func runLoop(args []string) error {
 	fs.StringVar(&name, "name", "", "unique wiggum name used for assignment")
 	fs.StringVar(&agentCmd, "agent", "", "full agent command used to process the work packet")
 	fs.IntVar(&max, "max", 1, "maximum number of issues to process (0 = forever)")
-	fs.BoolVar(&dryRun, "dryrun", false, "simulate work, sleep briefly, and close the bead")
+	fs.IntVar(&dryRunSecs, "dryrun", -1, "simulate work and pass this integer to the dry-run invocation")
 	fs.IntVar(&readyLimit, "limit", defaultReadyLimit, "maximum ready issues to consider per iteration")
-	fs.DurationVar(&sleepDur, "sleep", defaultDryRunSleep, "sleep duration used during dry-run work simulation")
+	fs.IntVar(&sleepSecs, "sleep", defaultLoopSleepSecs, "number of seconds to sleep between loop iterations")
 	fs.BoolVar(&noBranch, "no-branch", false, "do not create or switch git branches")
 
 	if err := fs.Parse(args); err != nil {
@@ -118,6 +118,11 @@ func runLoop(args []string) error {
 		fs.Usage()
 		return errors.New("missing required -name flag")
 	}
+	if sleepSecs < 0 {
+		fs.Usage()
+		return errors.New("sleep must be >= 0")
+	}
+	dryRun := dryRunSecs >= 0
 	if !dryRun && strings.TrimSpace(agentCmd) == "" {
 		fs.Usage()
 		return errors.New("missing required -agent flag")
@@ -159,7 +164,7 @@ func runLoop(args []string) error {
 		printWorkPacket(full, name, branchName, true, branched, dryRun)
 
 		if dryRun {
-			if err := performDryRunWork(full, name, branchName, branched, sleepDur); err != nil {
+			if err := performDryRunWork(full, name, branchName, branched, dryRunSecs); err != nil {
 				return err
 			}
 		} else {
@@ -173,6 +178,9 @@ func runLoop(args []string) error {
 		}
 
 		processed++
+		if (max == 0 || processed < max) && sleepSecs > 0 {
+			time.Sleep(time.Duration(sleepSecs) * time.Second)
+		}
 	}
 
 	return nil
@@ -238,7 +246,7 @@ func printUsage() {
 	fmt.Println("  wiggum agent command [arg...]")
 	fmt.Println("  wiggum check -name fred")
 	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1")
-	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1 -dryrun")
+	fmt.Println("  wiggum loop -name fred -agent \"codex --approval-mode never\" -max 1 -dryrun 5")
 	fmt.Println()
 	fmt.Println("Commands:")
 	fmt.Println("  agent   Run an interactive coding agent command with stdio passed through.")
@@ -389,11 +397,12 @@ func performWork(item issue, name, branch string, branched bool, agentCmd string
 	return nil
 }
 
-func performDryRunWork(item issue, name, branch string, branched bool, sleepDur time.Duration) error {
-	if sleepDur > 0 {
-		time.Sleep(sleepDur)
-	}
-	return runWorkCommand(item, name, branch, branched, true, "echo 'dry-run'")
+func performDryRunWork(item issue, name, branch string, branched bool, dryRunSecs int) error {
+	return runWorkCommand(item, name, branch, branched, true, dryRunCommand(dryRunSecs))
+}
+
+func dryRunCommand(dryRunSecs int) string {
+	return fmt.Sprintf("echo 'dry-run; sleep %d'", dryRunSecs)
 }
 
 func runWorkCommand(item issue, name, branch string, branched, dryRun bool, command string) error {
