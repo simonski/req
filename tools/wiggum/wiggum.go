@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	defaultReadyLimit = 100
-	defaultDryRunSleep = 10 * time.Second
+	defaultReadyLimit     = 100
+	defaultDryRunSleep    = 10 * time.Second
+	defaultPromptTemplate = "Perform the following:\n<BEAD>"
 )
 
 type issue struct {
@@ -375,7 +376,7 @@ func performWork(item issue, name, branch string) error {
 		return errors.New("WIGGUM_WORK_CMD is not set for non-dry-run execution")
 	}
 
-	packet := renderWorkPacket(item, name, branch, true, branch != "", false)
+	packet := renderPrompt(renderWorkPacket(item, name, branch, true, branch != "", false))
 	cmd := exec.Command("sh", "-c", workCmd)
 	cmd.Stdin = strings.NewReader(packet)
 	cmd.Stdout = os.Stdout
@@ -476,7 +477,7 @@ func switchBranch(branch string) error {
 }
 
 func printWorkPacket(item issue, name, branch string, assigned, branched, dryRun bool) {
-	fmt.Print(renderWorkPacket(item, name, branch, assigned, branched, dryRun))
+	fmt.Print(renderPrompt(renderWorkPacket(item, name, branch, assigned, branched, dryRun)))
 }
 
 func renderWorkPacket(item issue, name, branch string, assigned, branched, dryRun bool) string {
@@ -523,6 +524,20 @@ func renderWorkPacket(item issue, name, branch string, assigned, branched, dryRu
 	fmt.Fprintf(&b, "- Start work on %s\n", item.ID)
 	fmt.Fprintln(&b, "- Run tests with make before closing the issue")
 	return b.String()
+}
+
+func renderPrompt(packet string) string {
+	template := strings.TrimSpace(os.Getenv("WIGGUM_PROMPT_TEMPLATE"))
+	if template == "" {
+		template = defaultPromptTemplate
+	}
+	if strings.Contains(template, "<BEAD>") {
+		return strings.ReplaceAll(template, "<BEAD>", packet)
+	}
+	if strings.HasSuffix(template, "\n") {
+		return template + packet
+	}
+	return template + "\n" + packet
 }
 
 func splitAcceptance(input string) []string {
